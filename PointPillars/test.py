@@ -90,6 +90,7 @@ def main(args):
         bboxes2d, camera_bboxes = result_filter['bboxes2d'], result_filter['camera_bboxes'] 
         bboxes_corners = bbox3d2corners_camera(camera_bboxes)
         image_points = points_camera2image(bboxes_corners, P2)
+        print(bboxes2d[0], image_points[0])
         img = vis_img_3d(img, image_points, labels, rt=True)
 
     if calib_info is not None and gt_label is not None:
@@ -122,14 +123,15 @@ def main(args):
     if calib_info is not None and img is not None:
         cv2.imshow(f'{os.path.basename(args.img_path)}-3d bbox', img)
         cv2.waitKey(0)
-            
+
+
 def PointPillars_test(pc_path, calib_path, img_path, ckpt='pretrained/epoch_160.pth', no_cuda=False):
     CLASSES = {
-        'Pedestrian': 0, 
-        'Cyclist': 1, 
+        'Pedestrian': 0,
+        'Cyclist': 1,
         'Car': 2
-        }
-    LABEL2CLASSES = {v:k for k, v in CLASSES.items()}
+    }
+    LABEL2CLASSES = {v: k for k, v in CLASSES.items()}
     pcd_limit_range = np.array([0, -40, -3, 70.4, 40, 0.0], dtype=np.float32)
 
     if not no_cuda:
@@ -139,13 +141,13 @@ def PointPillars_test(pc_path, calib_path, img_path, ckpt='pretrained/epoch_160.
         model = PointPillars(nclasses=len(CLASSES))
         model.load_state_dict(
             torch.load(ckpt, map_location=torch.device('cpu')))
-    
+
     if not os.path.exists(pc_path):
-        raise FileNotFoundError 
+        raise FileNotFoundError
     pc = read_points(pc_path)
     pc = point_range_filter(pc)
     pc_torch = torch.from_numpy(pc)
-    
+
     if os.path.exists(calib_path):
         calib_info = read_calib(calib_path)
     else:
@@ -159,8 +161,8 @@ def PointPillars_test(pc_path, calib_path, img_path, ckpt='pretrained/epoch_160.
     with torch.no_grad():
         if not no_cuda:
             pc_torch = pc_torch.cuda()
-        
-        result_filter = model(batched_pts=[pc_torch], 
+
+        result_filter = model(batched_pts=[pc_torch],
                               mode='test')[0]
     if calib_info is not None and img is not None:
         tr_velo_to_cam = calib_info['Tr_velo_to_cam'].astype(np.float32)
@@ -172,10 +174,17 @@ def PointPillars_test(pc_path, calib_path, img_path, ckpt='pretrained/epoch_160.
 
     result_filter = keep_bbox_from_lidar_range(result_filter, pcd_limit_range)
     labels, scores, bboxes2d = result_filter['labels'], result_filter['scores'], result_filter['bboxes2d']
-    scores = scores[result_filter['labels'] == 0]
-    bboxes2d = bboxes2d[result_filter['labels'] == 0]
-    return torch.concat([bboxes2d.squeeze(), scores], dim=0)
-    
+    filter1 = result_filter['labels'] == 0
+    filter2 = result_filter['scores'] >= 0.25
+    filter = (filter1 & filter2)
+    scores = scores[filter]
+    bboxes2d = bboxes2d[filter]
+    # print(bboxes2d)
+    # print(scores[np.newaxis,:])
+    # print(np.concatenate((bboxes2d,scores[np.newaxis,:].T),axis=1))
+
+    return torch.tensor(np.concatenate((bboxes2d,scores[np.newaxis,:].T),axis=1))
+        
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Configuration Parameters')
     parser.add_argument('--ckpt', default='pretrained/epoch_160.pth', help='your checkpoint for kitti')
