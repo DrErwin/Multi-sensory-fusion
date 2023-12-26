@@ -84,7 +84,7 @@ class Dataset(IterableDataset):
             point_cloud = point_cloud_path / (image_idx + '.bin')
             calib = calib_path / (image_idx + '.txt')
             
-            yield (point_cloud, calib), img, label
+            yield (point_cloud, calib), str(img), label
 
     def __iter__(self) -> Iterator:
         return self.read_data()

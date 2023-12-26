@@ -97,7 +97,7 @@ def vis_pc(pc, bboxes=None, labels=None):
     vis_core(vis_objs)
 
 
-def vis_img_3d(img, image_points, labels, rt=True):
+def vis_img_3d(img, image_points, labels, rt=True, scores=None):
     '''
     img: (h, w, 3)
     image_points: (n, 8, 2)
@@ -106,6 +106,7 @@ def vis_img_3d(img, image_points, labels, rt=True):
 
     for i in range(len(image_points)):
         label = labels[i]
+        score = scores[i] if scores else None
         bbox_points = image_points[i] # (8, 2)
         if label >= 0 and label < 3:
             color = COLORS_IMG[label]
@@ -116,7 +117,35 @@ def vis_img_3d(img, image_points, labels, rt=True):
             x2, y2 = bbox_points[line_id[1]]
             x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
             cv2.line(img, (x1, y1), (x2, y2), color, 1)
+            cv2.putText(img, label, (x1, y1), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 1)
+            if score:
+                cv2.putText(img,score,(x1,y1), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 1)
     if rt:
         return img
-    cv2.imshow('bbox', img)
+    cv2.imshow('3Dbbox', img)
+    cv2.waitKey(0)
+    
+def vis_img_2d(img, bboxes2d, labels, rt=True, scores=None):
+    '''
+    img: (h, w, 3)
+    bboxes2d: (n, 4)
+    labels: (n, )
+    '''
+
+    for i in range(len(bboxes2d)):
+        label = labels[i]
+        score = scores[i] if scores else None
+        bbox_points = bboxes2d[i] # (8, 2)
+        if label >= 0 and label < 3:
+            color = COLORS_IMG[label]
+        else:
+            color = COLORS_IMG[-1]
+            
+        x1, y1, x2, y2 = int(bbox_points[0]), int(bbox_points[1]),int(bbox_points[2]), int(bbox_points[3])
+        cv2.rectangle(img, (x1,y1), (x2,y2), color, 1)
+        if score:
+            cv2.putText(img,score,(x1,y1), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 1)
+    if rt:
+        return img
+    cv2.imshow('2Dbbox', img)
     cv2.waitKey(0)
