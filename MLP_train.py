@@ -114,7 +114,7 @@ for epoch in tqdm(range(EPOCH), desc='Epoch'):
     writer.add_scalar('loss_regression', sum_loss_regression / idx, epoch)
     writer.add_scalar('loss_conf', sum_loss_conf / idx, epoch)
     
-    if epoch % 5 == 0:
+    if epoch % 3 == 0:
         torch.save({'epoch': epoch,
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
