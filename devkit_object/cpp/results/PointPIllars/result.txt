@@ -1,0 +1,9 @@
+eval image 2D bounding boxes
+pedestrian AP: 64.187416 62.364506 57.321190
+pedestrian AP: 28.383940 27.382025 25.164164
+
+eval bird's eye view bounding boxes
+pedestrian AP: 0.000000 0.000000 0.000000
+
+eval 3D bounding boxes
+pedestrian AP: 0.000000 0.000000 0.000000

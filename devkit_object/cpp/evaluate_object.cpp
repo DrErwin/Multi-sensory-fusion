@@ -31,8 +31,7 @@ STATIC EVALUATION PARAMETERS
 =======================================================================*/
 
 // holds the number of test images on the server
-const int32_t N_TESTIMAGES = 7518;
-//const int32_t N_TESTIMAGES = 7480;
+const int32_t N_TESTIMAGES = 7480;
 
 // easy, moderate and hard evaluation level
 enum DIFFICULTY{EASY=0, MODERATE=1, HARD=2};
@@ -51,21 +50,19 @@ const int NUM_CLASS = 3;
 
 // parameters varying per class
 vector<string> CLASS_NAMES;
-vector<string> CLASS_NAMES_CAP;
 // the minimum overlap required for 2D evaluation on the image/ground plane and 3D evaluation
+// const double MIN_OVERLAP[3][3] = {{0.7, 0.5, 0.5}, {0.5, 0.25, 0.25}, {0.5, 0.25, 0.25}};
 const double MIN_OVERLAP[3][3] = {{0.7, 0.5, 0.5}, {0.7, 0.5, 0.5}, {0.7, 0.5, 0.5}};
 
 // no. of recall steps that should be evaluated (discretized)
 const double N_SAMPLE_PTS = 41;
+
 
 // initialize class names
 void initGlobals () {
   CLASS_NAMES.push_back("car");
   CLASS_NAMES.push_back("pedestrian");
   CLASS_NAMES.push_back("cyclist");
-  CLASS_NAMES_CAP.push_back("Car");
-  CLASS_NAMES_CAP.push_back("Pedestrian");
-  CLASS_NAMES_CAP.push_back("Cyclist");
 }
 
 /*=======================================================================
@@ -130,6 +127,8 @@ struct tDetection {
 /*=======================================================================
 FUNCTIONS TO LOAD DETECTION AND GROUND TRUTH DATA ONCE, SAVE RESULTS
 =======================================================================*/
+vector<int32_t> indices;
+
 vector<tDetection> loadDetections(string file_name, bool &compute_aos,
         vector<bool> &eval_image, vector<bool> &eval_ground,
         vector<bool> &eval_3d, bool &success) {
@@ -160,19 +159,18 @@ vector<tDetection> loadDetections(string file_name, bool &compute_aos,
 
       // a class is only evaluated if it is detected at least once
       for (int c = 0; c < NUM_CLASS; c++) {
-        if (!strcasecmp(d.box.type.c_str(), CLASS_NAMES[c].c_str()) || !strcasecmp(d.box.type.c_str(), CLASS_NAMES_CAP[c].c_str())) {
+        if (!strcasecmp(d.box.type.c_str(), CLASS_NAMES[c].c_str())) {
           if (!eval_image[c] && d.box.x1 >= 0)
             eval_image[c] = true;
-          if (!eval_ground[c] && d.t1 != -1000 && d.t3 != -1000 && d.w > 0 && d.l > 0)
+          if (!eval_ground[c] && d.t1 != -1000)
             eval_ground[c] = true;
-          if (!eval_3d[c] && d.t1 != -1000 && d.t2 != -1000 && d.t3 != -1000 && d.h > 0 && d.w > 0 && d.l > 0) 
+          if (!eval_3d[c] && d.t2 != -1000)
             eval_3d[c] = true;
           break;
         }
       }
     }
   }
-  
   fclose(fp);
   success = true;
   return detections;
@@ -410,7 +408,7 @@ void cleanData(CLASSES current_class, const vector<tGroundtruth> &gt, const vect
     // ground truth is ignored, if occlusion, truncation exceeds the difficulty or ground truth is too small
     // (doesn't count as FN nor TP, although detections may be assigned)
     bool ignore = false;
-    if(gt[i].occlusion>MAX_OCCLUSION[difficulty] || gt[i].truncation>MAX_TRUNCATION[difficulty] || height<=MIN_HEIGHT[difficulty])
+    if(gt[i].occlusion>MAX_OCCLUSION[difficulty] || gt[i].truncation>MAX_TRUNCATION[difficulty] || height<MIN_HEIGHT[difficulty])
       ignore = true;
 
     // set ignored vector for ground truth
@@ -443,9 +441,9 @@ void cleanData(CLASSES current_class, const vector<tGroundtruth> &gt, const vect
       valid_class = 1;
     else
       valid_class = -1;
-    
+
     int32_t height = fabs(det[i].box.y1 - det[i].box.y2);
-    
+
     // set ignored vector for detections
     if(height<MIN_HEIGHT[difficulty])
       ignored_det.push_back(1);
@@ -706,7 +704,7 @@ bool eval_class (FILE *fp_det, FILE *fp_ori, CLASSES current_class,
     return true;
 }
 
-void saveAndPlotPlots(string dir_name,string file_name,string obj_type,vector<double> vals[],bool is_aos){
+float* saveAndPlotPlots(string dir_name,string file_name,string obj_type,vector<double> vals[],bool is_aos){
 
   char command[1024];
 
@@ -716,6 +714,17 @@ void saveAndPlotPlots(string dir_name,string file_name,string obj_type,vector<do
   for (int32_t i=0; i<(int)N_SAMPLE_PTS; i++)
     fprintf(fp,"%f %f %f %f\n",(double)i/(N_SAMPLE_PTS-1.0),vals[0][i],vals[1][i],vals[2][i]);
   fclose(fp);
+
+  float sum[3] = {0, 0, 0};
+  static float results[3] = {0, 0, 0};
+  for (int v = 0; v < 3; ++v)
+      for (int i = 0; i < vals[v].size(); i = i + 4)
+          sum[v] += vals[v][i];
+
+  for (int i = 0; i < 3; i++)
+      results[i] = sum[i] / 11 * 100;
+  printf("%s AP: %f %f %f\n", file_name.c_str(), sum[0] / 11 * 100, sum[1] / 11 * 100, sum[2] / 11 * 100);
+
 
   // create png + eps
   for (int32_t j=0; j<2; j++) {
@@ -767,16 +776,35 @@ void saveAndPlotPlots(string dir_name,string file_name,string obj_type,vector<do
   system(command);
   sprintf(command,"cd %s; rm %s_large.pdf",dir_name.c_str(),file_name.c_str());
   system(command);
+
+  return results;
 }
 
-bool eval(string result_sha,Mail* mail){
+vector<int32_t> getEvalIndices(const string& result_dir) {
+
+    DIR* dir;
+    dirent* entity;
+    dir = opendir(result_dir.c_str());
+    if (dir) {
+        while (entity = readdir(dir)) {
+            string path(entity->d_name);
+            int32_t len = path.size();
+            if (len < 10) continue;
+            int32_t index = atoi(path.substr(len - 10, 10).c_str());
+            indices.push_back(index);
+        }
+    }
+    return indices;
+}
+
+bool eval(string gt_dir, string result_dir, Mail* mail){
 
   // set some global parameters
   initGlobals();
 
   // ground truth and result directories
-  string gt_dir         = "data/object/label_2";
-  string result_dir     = "results/" + result_sha;
+  // string gt_dir         = "data/object/label_2";
+  // string result_dir     = "results/" + result_sha;
   string plot_dir       = result_dir + "/plot";
 
   // create output directories
@@ -795,11 +823,14 @@ bool eval(string result_sha,Mail* mail){
 
   // for all images read groundtruth and detections
   mail->msg("Loading detections...");
-  for (int32_t i=0; i<N_TESTIMAGES; i++) {
+  std::vector<int32_t> indices = getEvalIndices(result_dir + "/data/");
+  printf("number of files for evaluation: %d\n", (int)indices.size());
+
+  for (int32_t i=0; i<indices.size(); i++) {
 
     // file name
     char file_name[256];
-    sprintf(file_name,"%06d.txt",i);
+    sprintf(file_name,"%06d.txt",indices.at(i));
 
     // read ground truth and result poses
     bool gt_success,det_success;
@@ -824,12 +855,14 @@ bool eval(string result_sha,Mail* mail){
   // holds pointers for result files
   FILE *fp_det=0, *fp_ori=0;
 
+  FILE *fp = fopen((result_dir + "/result.txt").c_str(),"w");
+  float * results;
+
   // eval image 2D bounding boxes
+  fprintf(fp,"eval image 2D bounding boxes\n");
   for (int c = 0; c < NUM_CLASS; c++) {
     CLASSES cls = (CLASSES)c;
-    //mail->msg("Checking 2D evaluation (%s) ...", CLASS_NAMES[c].c_str());
     if (eval_image[c]) {
-      mail->msg("Starting 2D evaluation (%s) ...", CLASS_NAMES[c].c_str());
       fp_det = fopen((result_dir + "/stats_" + CLASS_NAMES[c] + "_detection.txt").c_str(), "w");
       if(compute_aos)
         fp_ori = fopen((result_dir + "/stats_" + CLASS_NAMES[c] + "_orientation.txt").c_str(),"w");
@@ -841,12 +874,14 @@ bool eval(string result_sha,Mail* mail){
         return false;
       }
       fclose(fp_det);
-      saveAndPlotPlots(plot_dir, CLASS_NAMES[c] + "_detection", CLASS_NAMES[c], precision, 0);
+      results = saveAndPlotPlots(plot_dir, CLASS_NAMES[c] + "_detection", CLASS_NAMES[c], precision, 0);
+      fprintf(fp,"%s AP: %f %f %f\n",CLASS_NAMES[c].c_str(), results[0], results[1], results[2]);
+
       if(compute_aos){
-        saveAndPlotPlots(plot_dir, CLASS_NAMES[c] + "_orientation", CLASS_NAMES[c], aos, 1);
+        results = saveAndPlotPlots(plot_dir, CLASS_NAMES[c] + "_orientation", CLASS_NAMES[c], aos, 1);
+        fprintf(fp,"%s AP: %f %f %f\n",CLASS_NAMES[c].c_str(), results[0], results[1], results[2]);
         fclose(fp_ori);
       }
-      mail->msg("  done.");
     }
   }
 
@@ -854,11 +889,10 @@ bool eval(string result_sha,Mail* mail){
   compute_aos = false;
 
   // eval bird's eye view bounding boxes
+  fprintf(fp,"\neval bird's eye view bounding boxes\n");
   for (int c = 0; c < NUM_CLASS; c++) {
     CLASSES cls = (CLASSES)c;
-    //mail->msg("Checking bird's eye evaluation (%s) ...", CLASS_NAMES[c].c_str());
     if (eval_ground[c]) {
-      mail->msg("Starting bird's eye evaluation (%s) ...", CLASS_NAMES[c].c_str());
       fp_det = fopen((result_dir + "/stats_" + CLASS_NAMES[c] + "_detection_ground.txt").c_str(), "w");
       vector<double> precision[3], aos[3];
       if(   !eval_class(fp_det, fp_ori, cls, groundtruth, detections, compute_aos, groundBoxOverlap, precision[0], aos[0], EASY, GROUND)
@@ -868,17 +902,16 @@ bool eval(string result_sha,Mail* mail){
         return false;
       }
       fclose(fp_det);
-      saveAndPlotPlots(plot_dir, CLASS_NAMES[c] + "_detection_ground", CLASS_NAMES[c], precision, 0);
-      mail->msg("  done.");
+      results = saveAndPlotPlots(plot_dir, CLASS_NAMES[c] + "_detection_ground", CLASS_NAMES[c], precision, 0);
+      fprintf(fp,"%s AP: %f %f %f\n",CLASS_NAMES[c].c_str(), results[0], results[1], results[2]);
     }
   }
 
   // eval 3D bounding boxes
+  fprintf(fp,"\neval 3D bounding boxes\n");
   for (int c = 0; c < NUM_CLASS; c++) {
     CLASSES cls = (CLASSES)c;
-    //mail->msg("Checking 3D evaluation (%s) ...", CLASS_NAMES[c].c_str());
     if (eval_3d[c]) {
-      mail->msg("Starting 3D evaluation (%s) ...", CLASS_NAMES[c].c_str());
       fp_det = fopen((result_dir + "/stats_" + CLASS_NAMES[c] + "_detection_3d.txt").c_str(), "w");
       vector<double> precision[3], aos[3];
       if(   !eval_class(fp_det, fp_ori, cls, groundtruth, detections, compute_aos, box3DOverlap, precision[0], aos[0], EASY, BOX3D)
@@ -888,11 +921,20 @@ bool eval(string result_sha,Mail* mail){
         return false;
       }
       fclose(fp_det);
-      saveAndPlotPlots(plot_dir, CLASS_NAMES[c] + "_detection_3d", CLASS_NAMES[c], precision, 0);
-      mail->msg("  done.");
+      results = saveAndPlotPlots(plot_dir, CLASS_NAMES[c] + "_detection_3d", CLASS_NAMES[c], precision, 0);
+      fprintf(fp,"%s AP: %f %f %f\n",CLASS_NAMES[c].c_str(), results[0], results[1], results[2]);
     }
   }
 
+  fclose(fp);
+
+  printf("\n##################################################\n");
+  FILE *fp_print = fopen((result_dir + "/result.txt").c_str(),"r");
+  char c;
+  while(fscanf(fp_print,"%c",&c)!=EOF)
+    printf("%c",c);
+  fclose(fp_print);
+  printf("\n##################################################\n");
   // success
   return true;
 }
@@ -900,28 +942,27 @@ bool eval(string result_sha,Mail* mail){
 int32_t main (int32_t argc,char *argv[]) {
 
   // we need 2 or 4 arguments!
-  if (argc!=2 && argc!=4) {
-    cout << "Usage: ./eval_detection result_sha [user_sha email]" << endl;
+  if (argc!=3) {
+    cout << "Usage: ./eval_detection_3d_offline gt_dir result_dir" << endl;
     return 1;
   }
 
   // read arguments
-  string result_sha = argv[1];
+  string gt_dir = argv[1];
+  string result_dir = argv[2];
 
   // init notification mail
   Mail *mail;
-  if (argc==4) mail = new Mail(argv[3]);
-  else         mail = new Mail();
+  mail = new Mail();
   mail->msg("Thank you for participating in our evaluation!");
 
   // run evaluation
-  if (eval(result_sha,mail)) {
+  if (eval(gt_dir, result_dir, mail)) {
     mail->msg("Your evaluation results are available at:");
-    mail->msg("http://www.cvlibs.net/datasets/kitti/user_submit_check_login.php?benchmark=object&user=%s&result=%s",argv[2], result_sha.c_str());
+    mail->msg(result_dir.c_str());
   } else {
-    system(("rm -r results/" + result_sha).c_str());
+    system(("rm -r " + result_dir + "/plot").c_str());
     mail->msg("An error occured while processing your results.");
-    mail->msg("Please make sure that the data in your zip archive has the right format!");
   }
 
   // send mail and exit
@@ -929,3 +970,4 @@ int32_t main (int32_t argc,char *argv[]) {
 
   return 0;
 }
+

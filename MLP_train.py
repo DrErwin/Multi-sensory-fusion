@@ -33,7 +33,7 @@ BCE_loss = torch.nn.BCEWithLogitsLoss()
 data_loader_train = Dataset(KITTI_TRAIN_PATH+'/velodyne_reduced',KITTI_TRAIN_PATH+'/calib',
                             KITTI_TRAIN_PATH+'/image_2',KITTI_TRAIN_PATH+'/label_2')
 model=MLPModel()
-optimizer = torch.optim.Adam(model.parameters(),lr=1e-4)
+optimizer = torch.optim.Adam(model.parameters(),lr=1e-3)
 YOLO_model = YOLO("yolov8n.pt")
 writer = SummaryWriter()
 
@@ -58,7 +58,8 @@ for epoch in tqdm(range(EPOCH), desc='Epoch'):
         YOLO_results = torch.tensor(YOLO_results)
         # print('YOLO result:',YOLO_results)
         if len(YOLO_results) == 0:
-            YOLO_results = torch.tensor([[-1,-1,-1,-1,-1]])
+            # YOLO_results = torch.tensor([[-1,-1,-1,-1,-1]])
+            YOLO_results = torch.tensor([[0, 0, 0, 0, 0]])
         '''
         PointPillars predict
         '''
@@ -85,10 +86,10 @@ for epoch in tqdm(range(EPOCH), desc='Epoch'):
             optimizer.zero_grad()
             single_regression_loss, gt_score = ciou_loss(enclosing_box[box_idx], predict, gt_boxes)
             gt_scores = torch.cat([gt_scores, gt_score], dim=0)
-            loss = loss + 10 * single_regression_loss*0.4
+            loss = loss + 100 * single_regression_loss
         loss_regression = loss
-        loss_conf = 10 * BCE_loss(scores, gt_scores)
-        loss = loss + loss_conf*0.6
+        loss_conf = 100 * BCE_loss(scores, gt_scores)
+        loss = loss + loss_conf
         # print(scores)
         # print(gt_scores)
         loss = loss / len(input)
@@ -105,8 +106,8 @@ for epoch in tqdm(range(EPOCH), desc='Epoch'):
         optimizer.step()
  
         sum_loss+=loss.data
-        sum_loss_regression+=loss_regression.data
-        sum_loss_conf+=loss_conf.data
+        sum_loss_regression+=loss_regression.data/ len(input)
+        sum_loss_conf+=loss_conf.data/ len(input)
         idx += 1
     print('epoch[%d/%d] loss:%.03f' % (epoch + 1, EPOCH, sum_loss / idx))
     print(time.strftime('%Y-%m-%d %H:%M:%S', time.localtime()))

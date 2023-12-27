@@ -444,7 +444,6 @@ def calculate_iou_partly(gt_annos,
             gt_num_idx += gt_box_num
             dt_num_idx += dt_box_num
         example_idx += num_part
-
     return overlaps, parted_overlaps, total_gt_num, total_dt_num
 
 
@@ -504,7 +503,6 @@ def eval_class(gt_annos,
     Returns:
         dict of recall, precision and aos
     """
-    print(len(gt_annos),len(dt_annos))
     assert len(gt_annos) == len(dt_annos)
     num_examples = len(gt_annos)
     split_parts = get_split_parts(num_examples, num_parts)

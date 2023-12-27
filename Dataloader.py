@@ -49,24 +49,32 @@ def get_label_anno(label_path):
         annotations['score'] = np.zeros([len(annotations['bbox'])])
     return annotations
 
+def _read_imageset_file(path):
+    with open(path, 'r') as f:
+        lines = f.readlines()
+    return [int(line) for line in lines]
 
 class Dataset(IterableDataset):
-    def __init__(self, point_cloud_path, calib_path, img_path, label_path) -> None:
+    def __init__(self, point_cloud_path, calib_path, img_path, label_path, val_image_ids=None) -> None:
         super().__init__()
         self.label_path = label_path
         self.img_path = img_path
         self.point_cloud_path = point_cloud_path
         self.calib_path = calib_path
         self.annos = []
+        self.val_image_ids = _read_imageset_file(val_image_ids) if val_image_ids is not None else None
     '''
     Return: (path_of_point_file, path_of_calib_file), path_of_img_file, labels_in_an_img
     '''
     def read_data(self):
-        filepaths = pathlib.Path(self.label_path).glob('*.txt')
-        prog = re.compile(r'^\d{6}.txt$')
-        filepaths = filter(lambda f: prog.match(f.name), filepaths)
-        image_ids = [int(p.stem) for p in filepaths]
-        image_ids = sorted(image_ids)
+        if self.val_image_ids is None:
+            filepaths = pathlib.Path(self.label_path).glob('*.txt')
+            prog = re.compile(r'^\d{6}.txt$')
+            filepaths = filter(lambda f: prog.match(f.name), filepaths)
+            image_ids = [int(p.stem) for p in filepaths]
+            image_ids = sorted(image_ids)
+        else:
+            image_ids = self.val_image_ids
         
         label_path = pathlib.Path(self.label_path)
         img_path = pathlib.Path(self.img_path)

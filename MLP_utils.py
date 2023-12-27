@@ -143,8 +143,8 @@ class CIOULoss(torch.nn.Module):
         enclosing_box_height = enclosing_box[3] - enclosing_box[1]
 
         enclosing_box_w_h = torch.stack([enclosing_box_width, enclosing_box_height])
-        predict_w_h = enclosing_box_w_h*torch.exp(predict[2:])
-        predict_center = enclosing_box[:2] + 2*enclosing_box_w_h*predict[0:2].softmax(dim=0)
+        predict_w_h = enclosing_box_w_h * 2*predict[2:].sigmoid()
+        predict_center = enclosing_box[:2] + 2*enclosing_box_w_h*predict[0:2].sigmoid()
         predict_box = torch.cat([predict_center-predict_w_h/2, predict_center+predict_w_h/2])
 
         loss = loss + complete_box_iou_loss(gt_box, predict_box)
