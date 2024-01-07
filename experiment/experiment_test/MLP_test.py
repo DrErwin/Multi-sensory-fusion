@@ -4,7 +4,7 @@ from torchvision import datasets, transforms
 from torch.autograd import Variable
 import time
 import sys
-
+from  PIL import Image
 from tqdm import tqdm
 
 sys.path.append('../..')
@@ -18,12 +18,10 @@ from MLP_utils import *
 
 
 KITTI_TRAIN_PATH = '/media/server1/5150/Wu/KITTI/training'
-CKP_PATH = '../../99.pth'
+CKP_PATH = '../../198.pth'
 VAL_PATH = '../../ImageSets/val.txt'
 RESULT_PATH = '../results/MLP_results/'
 
-transform = transforms.Compose([transforms.ToTensor(),
-                               transforms.Normalize((0.5,),(0.5,))])
 
 data_loader_train = Dataset(KITTI_TRAIN_PATH + '/velodyne_reduced', KITTI_TRAIN_PATH + '/calib',
                             KITTI_TRAIN_PATH + '/image_2', KITTI_TRAIN_PATH + '/label_2', val_image_ids=VAL_PATH)
@@ -31,10 +29,8 @@ data_loader_train = Dataset(KITTI_TRAIN_PATH + '/velodyne_reduced', KITTI_TRAIN_
 model=MLPModel()
 checkpoint = torch.load(CKP_PATH)
 model.load_state_dict(checkpoint['model_state_dict'])
-
-optimizer = torch.optim.Adam(model.parameters(),lr=1e-4)
 optimizer = torch.optim.Adam(model.parameters())
-optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+# optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
 YOLO_model = YOLO("../../yolov8n.pt")
 print('Training epoch {}, training loss'.format(checkpoint['epoch'], checkpoint['loss']))
@@ -43,6 +39,7 @@ model.eval()
 for idx,((point_file, calib_file), img_file, gt_bbox) in enumerate(tqdm(data_loader_train, desc='Data no.')):
     if VAL_PATH:
         idx = data_loader_train.val_image_ids[idx]
+    img_w, img_h = Image.open(img_file).size
     '''
     YOLO predict
     '''
@@ -54,7 +51,7 @@ for idx,((point_file, calib_file), img_file, gt_bbox) in enumerate(tqdm(data_loa
     YOLO_results = torch.tensor(YOLO_results)
     # print('YOLO result:',YOLO_results)
     if len(YOLO_results) == 0:
-        YOLO_results = torch.tensor([[-1,-1,-1,-1,-1]])
+        YOLO_results = torch.tensor([[0, 0, 0, 0, 0]], dtype=torch.double)
     '''
     PointPillars predict
     '''
@@ -64,9 +61,15 @@ for idx,((point_file, calib_file), img_file, gt_bbox) in enumerate(tqdm(data_loa
         MLP_results = []
     else:
         '''
+        Normalize
+        '''
+        YOLO_results /= torch.tensor([img_w, img_h, img_w, img_h, 1])
+        PointPillars_results /= torch.tensor([img_w, img_h, img_w, img_h, 1])
+        '''
         Bounding Box Pair
         '''
         input, enclosing_box = align_boxes(YOLO_results, PointPillars_results)
+        enclosing_box *= torch.tensor([img_w, img_h, img_w, img_h, 1])
         '''
         Predict
         '''
@@ -86,8 +89,8 @@ for idx,((point_file, calib_file), img_file, gt_bbox) in enumerate(tqdm(data_loa
         enclosing_box_height = enclosing_box[:,3] - enclosing_box[:,1]
         enclosing_box_w_h = np.concatenate((enclosing_box_width[np.newaxis,:].T, enclosing_box_height[np.newaxis,:].T),axis=1)
 
-        predict_w_h = enclosing_box_w_h * np.exp(predicts[:,2:])
-        predict_center = enclosing_box[:,:2] + enclosing_box_w_h * torch.tensor(predicts[:,0:2]).softmax(dim=1).numpy()
+        predict_w_h = enclosing_box_w_h * 2 * predicts[:,2:]
+        predict_center = enclosing_box[:,:2] + enclosing_box_w_h * predicts[:,0:2]
         predict_box = np.concatenate([predict_center - predict_w_h / 2, predict_center + predict_w_h / 2],axis=1)
 
         MLP_results = np.concatenate([predict_box,scores[np.newaxis,:].T],axis=1)

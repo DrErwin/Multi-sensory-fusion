@@ -3,6 +3,15 @@ import numpy as np
 import torch
 import scipy.stats as stats
 
+COCO_CFG = dict(
+    darkness_range=(0.01,1.0),
+    gamma_range=(2.0,3.5),
+    rgb_range=(0.8,0.1),
+    red_range=(1.9,2.4),
+    blue_range=(1.5,1.9),
+    quantisation=(12,14,16)
+)
+
 def apply_ccm(image, ccm):
     '''
     The function of apply CCM matrix

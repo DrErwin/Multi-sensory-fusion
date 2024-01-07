@@ -12,12 +12,12 @@ from tqdm import tqdm
 import sys
 
 
-RESULT_PATH = '../results/YOLO_results/'
+RESULT_PATH = '../results/YOLO_dark_results/'
 KITTI_TRAIN_PATH = '/media/server1/5150/Wu/KITTI/training'
 VAL_PATH = '../../ImageSets/val.txt'
 
 data_loader_train = Dataset(KITTI_TRAIN_PATH + '/velodyne_reduced', KITTI_TRAIN_PATH + '/calib',
-                            KITTI_TRAIN_PATH + '/image_2', KITTI_TRAIN_PATH + '/label_2', val_image_ids=VAL_PATH)
+                            KITTI_TRAIN_PATH + '/image_2_dark', KITTI_TRAIN_PATH + '/label_2', val_image_ids=VAL_PATH)
 
 YOLO_model = YOLO("../../yolov8n.pt")
 for idx,((point_file, calib_file), img_file, gt_bbox) in enumerate(tqdm(data_loader_train, desc='Data no.')):

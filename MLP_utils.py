@@ -5,6 +5,7 @@
 :LastEditTime: 2023-12-15 20:15:23
 :Description: 
 '''
+import numpy
 from torchvision.ops.ciou_loss import complete_box_iou_loss
 from torchvision.ops.boxes import box_iou
 from torch.autograd import Variable
@@ -16,7 +17,7 @@ from torchvision.ops._utils import _loss_inter_union, _upcast_non_float
 
 
 THRESHOLD_BBP = 0.7
-THRESHOLD_GT = 0.5
+THRESHOLD_GT = 0.2
 
 '''
 :description: 每张图片里的两模态BB坐标及置信度，获得模型输入的14维向量
@@ -29,7 +30,7 @@ MLP的输入(Q,14)=(:, [S_c,S_l,BB_c, BB_l, BB_M])
 def align_boxes(RGB_BB:torch.Tensor, LIDAR_BB:torch.Tensor):
     smallest_enclosing_box_list = []
     model_input_list = []
-    # 计算每个BB的IOU，匹配阈值THRESHOLD_BBP=0.7
+    # 计算每个BB的IOU，匹配阈值THRESHOLD_BBP
     IOU_metrix = box_iou(RGB_BB[:,:4], LIDAR_BB[:,:4])
     IOU_metrix[IOU_metrix < THRESHOLD_BBP] = 0
     # 对每个LIDAR框找到最佳匹配的RGB框下标
@@ -45,7 +46,7 @@ def align_boxes(RGB_BB:torch.Tensor, LIDAR_BB:torch.Tensor):
             smallest_enclosing_box_list.append(torch.cat([enclosing_box,conf],dim=0))
             # smallest_enclosing_box_list.append(torch.cat([enclosing_box, torch.tensor(torch.max())],dim=0))
         else:
-            output = torch.cat([torch.tensor([-1, LIDAR_BB[i,-1].tolist(), -1, -1, -1, -1]),LIDAR_BB[i,:4]])
+            output = torch.cat([torch.tensor([0, LIDAR_BB[i,-1].tolist(), 0, 0, 0, 0]),LIDAR_BB[i,:4]])
             enclosing_box = LIDAR_BB[i,:4]
             model_input_list.append(torch.cat([output,enclosing_box],dim=0))
             conf = LIDAR_BB[i,-1].unsqueeze(0)
@@ -91,50 +92,23 @@ class CIOULoss(torch.nn.Module):
         super(CIOULoss, self).__init__()
         self.threshold_gt = THRESHOLD_GT
 
-    # def forward(self, enclosing_boxes:torch.Tensor, predict:torch.Tensor, gt_boxes:torch.Tensor):
-    #     '''
-    #     预测BB中心点为(enclosing_box[0] + enclosing_box_width*x_c, enclosing_box[1] + enclosing_box_height*y_c)，
-    #     宽度为enclosing_box_width*exp(p_w)，高度为enclosing_box_height*exp(p_h)
-    #     '''
-    #     IOU_metrix = box_iou(enclosing_boxes[:,:-1], gt_boxes[:,:])
-    #     # 计算每个BB的IOU
-    #     IOU_metrix[IOU_metrix < self.threshold_gt] = 0
-    #     # 对每个最小外接框找到最佳匹配的GT
-    #     gt_box_index = torch.argmax(IOU_metrix, axis=1) # (Q, )
-    #     loss = Variable(torch.Tensor([0]),requires_grad=True)
-    #     for i in range(len(gt_box_index)):
-    #         # if IOU_metrix[i,gt_box_index[i]] == 0:
-    #         #     continue
-    #         gt_box = gt_boxes[gt_box_index[i]]
-    #         enclosing_box = enclosing_boxes[i,:-1]
-    #         # print(enclosing_box, gt_box)
-    #
-    #         enclosing_box_width = enclosing_box[2] - enclosing_box[0]
-    #         enclosing_box_height = enclosing_box[3] - enclosing_box[1]
-    #
-    #         enclosing_box_w_h = torch.stack([enclosing_box_width, enclosing_box_height])
-    #         predict_w_h = enclosing_box_w_h*torch.exp(predict[i,2:])
-    #         predict_center = enclosing_box[:2] + enclosing_box_w_h*predict[i,0:2].softmax(dim=0)
-    #         predict_box = torch.cat([predict_center-predict_w_h/2, predict_center+predict_w_h/2])
-    #
-    #         loss = loss + complete_box_iou_loss(gt_box, predict_box) * ALPHA_CIOU
-    #     return loss
     def forward(self, enclosing_box:torch.Tensor, predict:torch.Tensor, gt_boxes:torch.Tensor):
         '''
         预测BB中心点为(enclosing_box[0] + enclosing_box_width*x_c, enclosing_box[1] + enclosing_box_height*y_c)，
         宽度为enclosing_box_width*exp(p_w)，高度为enclosing_box_height*exp(p_h)
         '''
-        loss = 0
         IOU_metrix = box_iou(torch.unsqueeze(enclosing_box[:-1],dim=0), gt_boxes[:,:])
         # 计算每个BB的IOU
         IOU_metrix[IOU_metrix < self.threshold_gt] = 0
         # 对每个最小外接框找到最佳匹配的GT
         gt_box_index = torch.argmax(IOU_metrix, axis=1) # (Q, )
-        if IOU_metrix[0][gt_box_index] > 0:
-            pass
-        else:
-            return loss, torch.tensor([1])
 
+        if IOU_metrix[0][gt_box_index] == 0:
+            loss_regression = torch.tensor([0], dtype=torch.double)
+            loss_confidence = torch.tensor([0], dtype=torch.double)
+            return loss_regression, loss_confidence
+
+        loss_confidence = torch.tensor([enclosing_box[-1]], dtype=torch.double)
         gt_box = gt_boxes[gt_box_index]
         enclosing_box = enclosing_box[:-1]
         # print(enclosing_box, gt_box)
@@ -143,13 +117,16 @@ class CIOULoss(torch.nn.Module):
         enclosing_box_height = enclosing_box[3] - enclosing_box[1]
 
         enclosing_box_w_h = torch.stack([enclosing_box_width, enclosing_box_height])
-        predict_w_h = enclosing_box_w_h * 2*predict[2:].sigmoid()
-        predict_center = enclosing_box[:2] + 2*enclosing_box_w_h*predict[0:2].sigmoid()
+        predict_w_h = enclosing_box_w_h * 2*predict[2:]
+        predict_center = enclosing_box[:2] + enclosing_box_w_h*predict[0:2]
         predict_box = torch.cat([predict_center-predict_w_h/2, predict_center+predict_w_h/2])
 
-        loss = loss + complete_box_iou_loss(gt_box, predict_box)
-        return loss, torch.tensor([0])
+        loss_regression = complete_box_iou_loss(gt_box, predict_box)
 
+        return loss_regression, loss_confidence
+
+def sigmoid(x:numpy.array):
+    return 1/(1+numpy.exp(-x))
 
 if __name__ == '__main__':
     RGB_BB = torch.tensor([[100,100,200,200,0.7]])

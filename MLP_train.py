@@ -14,26 +14,25 @@ from Dataloader import Dataset
 from ultralytics import YOLO
 from MLP_utils import *
 from tqdm import tqdm
+from PIL import Image
 
 import sys
 sys.path.append('PointPillars')
 sys.path.append('PointPillars.ops')
 from PointPillars.test import *
 
-BATCH_SIZE = 1
-EPOCH = 100
+torch.manual_seed(3407)
+EPOCH = 200
 KITTI_TRAIN_PATH = '/media/server1/5150/Wu/KITTI/training'
-KITTI_TEST_PATH = '/media/server1/5150/Wu/KITTI/training'
-
-transform = transforms.Compose([transforms.ToTensor(),
-                               transforms.Normalize((0.5,),(0.5,))])
 
 ciou_loss = CIOULoss()
-BCE_loss = torch.nn.BCEWithLogitsLoss()
+# BCE_loss = torch.nn.BCEWithLogitsLoss()
+BCE_loss = torch.nn.BCELoss()
 data_loader_train = Dataset(KITTI_TRAIN_PATH+'/velodyne_reduced',KITTI_TRAIN_PATH+'/calib',
                             KITTI_TRAIN_PATH+'/image_2',KITTI_TRAIN_PATH+'/label_2')
 model=MLPModel()
-optimizer = torch.optim.Adam(model.parameters(),lr=1e-3)
+optimizer = torch.optim.Adam(model.parameters(),lr=1e-4,weight_decay=5e-4)
+scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.95)
 YOLO_model = YOLO("yolov8n.pt")
 writer = SummaryWriter()
 
@@ -43,10 +42,13 @@ for epoch in tqdm(range(EPOCH), desc='Epoch'):
     sum_loss_regression = 0
     sum_loss_conf = 0
     idx = 0
+    scheduler.step()
     for (point_file, calib_file), img_file, gt_boxes in tqdm(data_loader_train, desc='Data no.'):
         gt_boxes = torch.tensor(gt_boxes)
+        img_w, img_h = Image.open(img_file).size
         if len(gt_boxes) == 0:
             continue
+
         '''
         YOLO predict
         '''
@@ -59,7 +61,8 @@ for epoch in tqdm(range(EPOCH), desc='Epoch'):
         # print('YOLO result:',YOLO_results)
         if len(YOLO_results) == 0:
             # YOLO_results = torch.tensor([[-1,-1,-1,-1,-1]])
-            YOLO_results = torch.tensor([[0, 0, 0, 0, 0]])
+            YOLO_results = torch.tensor([[0, 0, 0, 0, 0]], dtype=torch.double)
+
         '''
         PointPillars predict
         '''
@@ -69,10 +72,18 @@ for epoch in tqdm(range(EPOCH), desc='Epoch'):
             continue
         # print('PointPillars result:', PointPillars_results)
         '''
+        Normalize
+        '''
+        YOLO_results /= torch.tensor([img_w, img_h, img_w, img_h, 1])
+        PointPillars_results /= torch.tensor([img_w, img_h, img_w, img_h, 1])
+
+        '''
         Bounding Box Pair
         '''
         input, enclosing_box = align_boxes(YOLO_results, PointPillars_results)
-        
+        enclosing_box *= torch.tensor([img_w, img_h, img_w, img_h, 1])
+        # print('input:',input)
+        # print('enclosing_box:', enclosing_box)
         '''
         Predict and compute loss
         '''
@@ -86,17 +97,16 @@ for epoch in tqdm(range(EPOCH), desc='Epoch'):
             optimizer.zero_grad()
             single_regression_loss, gt_score = ciou_loss(enclosing_box[box_idx], predict, gt_boxes)
             gt_scores = torch.cat([gt_scores, gt_score], dim=0)
-            loss = loss + 100 * single_regression_loss
+            loss = loss + 50 * single_regression_loss
         loss_regression = loss
-        loss_conf = 100 * BCE_loss(scores, gt_scores)
+        loss_conf = 50 * BCE_loss(scores, gt_scores)
         loss = loss + loss_conf
-        # print(scores)
-        # print(gt_scores)
+        print(loss_conf)
+        print(loss_regression)
         loss = loss / len(input)
         if loss == 0:
             continue
-        # print('loss:')
-        # print(loss)
+
         loss.backward()
         # for name, para in model.linear4.named_parameters():
         #     print('-->name:', name)

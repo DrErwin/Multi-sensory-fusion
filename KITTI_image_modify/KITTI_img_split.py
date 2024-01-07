@@ -26,8 +26,8 @@ def split_and_save(img_file, path=None):
     
     save_path = path if path else save_path
     
-    save_img(im1, save_path+save_name+'_01'+save_ext)
-    save_img(im2, save_path+save_name+'_02'+save_ext)
+    save_img(im1, save_path+'/'+save_name+'_01'+save_ext)
+    save_img(im2, save_path+'/'+save_name+'_02'+save_ext)
 
 def resize(width,height,img):
     img = Image.open(img)
@@ -46,9 +46,9 @@ def concat_and_save(im1_file, im2_file):
     
     save_path, save_name = os.path.split(im1_file)
     save_name, save_ext = os.path.splitext(save_name)
-    save_name = save_name.split('_')[0] + '_new'
-    save_img(new_img, save_path+save_name+save_ext)
+    save_name = save_name.split('_')[0]
+    save_img(new_img, save_path+'/'+save_name+save_ext)
     
 # split_and_save('000009.png')
-concat_and_save('000009_01.png', '000009_02.png')
+# concat_and_save('000009_01.png', '000009_02.png')
 
